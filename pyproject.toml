@@ -8,8 +8,8 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
+    "emmet-core>=0.85.1",
     "mp-api>=0.40",
-    # base settings is used to load API key from env/files
     "pydantic-settings>=2",
     "pymatgen>=2025.10.7",
 ]
