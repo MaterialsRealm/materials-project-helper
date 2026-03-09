@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-mp-helper = "mp_helper:main"
+mp-helper = "materials_project_helper:main"
 
 [build-system]
 requires = ["uv_build>=0.10.9,<0.11.0"]

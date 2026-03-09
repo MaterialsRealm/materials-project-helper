@@ -1,4 +1,4 @@
-"""Top-level package for mp_helper (materials-project-helper).
+"""Top-level package for materials_project_helper.
 
 This project is intentionally very small; helpers for interacting with the
 Materials Project API are available via the :mod:`api` submodule.
