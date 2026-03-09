@@ -60,11 +60,6 @@ class MaterialsSearcher:
         passed to ``mpr.materials.search`` is accepted.  Records lacking a
         ``structure`` field are silently skipped.
         """
-        if (
-            Structure is None or MPRelaxSet is None
-        ):  # pragma: no cover - import error path
-            raise ImportError("pymatgen is required to build MPRelaxSet objects")
-
         sets: list["MPRelaxSet"] = []
         for rec in self.download_materials(**search_kwargs):
             struct_json = rec.get("structure")
