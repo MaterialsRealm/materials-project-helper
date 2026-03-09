@@ -1,4 +1,5 @@
 # materials-project-helper
+
 Helper code for the Materials Project
 
 This small package provides a convenience wrapper around the ``mp-api``
@@ -23,6 +24,17 @@ with get_client("/some/dir") as mpr:
 # export MP_API_KEY="..."
 with get_client() as mpr:
     ...
+
+# convenience helpers
+
+```python
+from mp_helper import download_materials
+
+# get all entries in the Fe–Co chemical system
+results = download_materials("Fe-Co")
+
+# or query multiple systems at once
+results = download_materials(["Fe-Co", "Fe-O"])
 ```
 
 Supported config file formats are:
@@ -36,4 +48,3 @@ code that expects the normal environment variable will continue to work.
 
 > **Security note:** keep configuration files containing secret keys out of
 > version control (add them to ``.gitignore``).
-
