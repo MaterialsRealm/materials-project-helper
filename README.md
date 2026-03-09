@@ -27,22 +27,27 @@ with get_client() as mpr:
 
 # querying materials
 
-Rather than exposing bare helper functions, the package now provides a
-small wrapper class that forwards every keyword argument directly to the
-Materials Project API's search method.
+The package exposes a single helper class that wraps an
+``mp_api.client.MPRester`` instance.  You can either let the helper create
+its own client or inject one of your own.
 
 ```python
-from mp_helper import MaterialsSearcher
+from mp_helper import MaterialsSearcher, get_client
 
+# simple usage with automatic client creation
 searcher = MaterialsSearcher()
-# equivalent of ``chemsys="Fe-Co"``
-results = searcher.download_materials(chemsys="Fe-Co")
+results = searcher.search(chemsys="Fe-Co")
 
-# you can pass any supported filter
-results = searcher.download_materials(elements=["Fe", "Co"], density=(0, 7))
+# pass any supported filter
+results = searcher.search(elements=["Fe","Co"], density=(0,7))
 
-# generate relaxation input sets if pymatgen is installed
-relax_sets = searcher.download_relax_sets(chemsys="Fe-Co")
+# convert results to RelaxSet objects (requires pymatgen)
+relax_sets = searcher.get_relax_sets(chemsys="Fe-Co")
+
+# if you already have a client, you can provide it
+with get_client() as mpr:
+    custom_searcher = MaterialsSearcher(mpr=mpr)
+    results = custom_searcher.search(task_ids=["fcc"])
 ```
 
 Supported config file formats are:

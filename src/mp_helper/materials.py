@@ -1,9 +1,10 @@
 """Helpers for querying materials by chemical system.
 
-The :func:`download_materials` convenience wrapper performs one or more
-searches against ``mpr.materials`` and returns the combined results as a list
-of dictionaries.  This module keeps the public API small; more advanced
-queries can be issued directly through :func:`mp_helper.api.get_client`.
+This module exposes a single helper class, :class:`MaterialsSearcher`, which
+wraps an ``mpr.materials`` client.  It provides a thin interface to issue
+searches and to obtain ``MPRelaxSet`` objects without burdening callers with
+client instantiation or configuration details.  Advanced usage may bypass
+the helper by calling :func:`mp_helper.api.get_client` directly.
 """
 
 from pymatgen.core.structure import Structure
@@ -14,24 +15,70 @@ from .api import get_client
 __all__ = ["MaterialsSearcher"]
 
 
-MaterialRecord = object  # whatever ``mpr.materials.search`` yields (typically
+from typing import Any
+
+MaterialRecord = Any  # whatever ``mpr.materials.search`` yields (typically
 # pydantic models).  We do not mutate or convert the results, preserving the
 # original types so callers can access attributes directly.
 
 
 class MaterialsSearcher:
-    """Convenience wrapper around ``mpr.materials.search``.
+    """Lightweight wrapper around an ``mpr.materials`` client.
 
-    Each instance simply opens a fresh ``MPRester`` using
-    :func:`mp_helper.api.get_client`.  The two key operations from the earlier
-    version are provided as methods, which accept *any* keyword argument that
-    the underlying ``search`` call supports.  In other words, callers may use
-    ``chemsys`` (the usual case), ``elements``, ``density=(0,5)``,
-    ``formula="Fe2O3"``, etc.  Positional arguments are **not** accepted;
-    all filters must be provided as keywords.
+    The constructor accepts an optional ``mpr`` object (an
+    :class:`mp_api.client.MPRester` instance).  If none is provided the helper
+    will call :func:`mp_helper.api.get_client()` to create its own client; in
+    that case the helper will also close the client when it is garbage-
+    collected.  The underlying client is exposed via the read-only
+    :attr:`mpr` property so callers can reuse it for other operations.
+
+    The two public methods mirror the core ``search`` functionality:
+    ``search`` returns the raw documents, and ``get_relax_sets`` converts
+    records with structural data into ``MPRelaxSet`` objects.  Both methods
+    accept whatever keyword arguments the Materials Project API supports
+    (``chemsys``, ``elements``, ``density`` etc.).  Positional arguments are
+    not accepted; supply filters by keyword only.
     """
 
-    def download_materials(self, **search_kwargs) -> list[MaterialRecord]:
+    def __init__(self, mpr=None):
+        """Initialize the helper.
+
+        Args:
+            mpr: Optional ``MPRester`` instance.  If omitted the helper will
+                create one from :func:`get_client` and take responsibility for
+                closing it.
+        """
+        if mpr is None:
+            self._mpr = get_client()
+            self._owns_client = True
+        else:
+            self._mpr = mpr
+            self._owns_client = False
+
+    @property
+    def mpr(self):
+        """The underlying :class:`MPRester` client (read-only)."""
+        return self._mpr
+
+    def __del__(self):
+        # Close owned client when garbage-collected; ignore if already closed
+        if getattr(self, "_owns_client", False) and self._mpr is not None:
+            try:
+                self._mpr.close()
+            except Exception:
+                pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if getattr(self, "_owns_client", False) and self._mpr is not None:
+            try:
+                self._mpr.close()
+            except Exception:
+                pass
+
+    def search(self, **search_kwargs) -> list[MaterialRecord]:
         """Return raw records matching the given query.
 
         The keyword arguments mirror the signature of
@@ -68,23 +115,30 @@ class MaterialsSearcher:
                 returned exactly as produced by ``mpr.materials.search``.
         """
         results: list[MaterialRecord] = []
-        with get_client() as mpr:
-            for item in mpr.materials.search(**search_kwargs):
-                results.append(item)
+        # Use the stored client rather than opening a fresh one each call
+        for item in self._mpr.materials.search(**search_kwargs):
+            results.append(item)
         return results
 
-    def download_relax_sets(self, **search_kwargs) -> list["MPRelaxSet"]:
+    def get_relax_sets(self, **search_kwargs) -> list["MPRelaxSet"]:
         """Return ``MPRelaxSet`` objects for materials matching ``search_kwargs``.
 
-        The semantics mirror :meth:`download_materials`; any argument that may be
-        passed to ``mpr.materials.search`` is accepted.  Records lacking a
-        ``structure`` field are silently skipped.
+        The semantics mirror :meth:`search`; any argument that may be passed to
+        ``mpr.materials.search`` is accepted.  Records lacking a ``structure``
+        field are silently skipped.
         """
         sets: list["MPRelaxSet"] = []
-        for rec in self.download_materials(**search_kwargs):
-            struct_json = rec.get("structure")
+        for rec in self.search(**search_kwargs):
+            # ``rec`` could be a dict-like object or a pydantic model.  Try
+            # both access methods.
+            struct_json = None
+            if isinstance(rec, dict):
+                struct_json = rec.get("structure")
+            else:
+                struct_json = getattr(rec, "structure", None)
+
             if struct_json is None:
                 continue
-            structure = Structure.from_dict(struct_json)  # type: ignore[attr-defined]
+            structure = Structure.from_dict(struct_json)
             sets.append(MPRelaxSet(structure))  # type: ignore[call-arg]
         return sets
