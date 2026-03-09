@@ -35,6 +35,11 @@ results = download_materials("Fe-Co")
 
 # or query multiple systems at once
 results = download_materials(["Fe-Co", "Fe-O"])
+
+# generate a relaxation input set for each result
+from mp_helper import download_relax_sets
+
+relax_sets = download_relax_sets("Fe-Co")  # returns list of MPRelaxSet objects
 ```
 
 Supported config file formats are:
