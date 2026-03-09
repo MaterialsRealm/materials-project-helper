@@ -50,7 +50,7 @@ class MaterialsSearcher:
         results: list[MaterialRecord] = []
         with get_client() as mpr:
             for item in mpr.materials.search(**search_kwargs):
-                results.append(item.dict() if hasattr(item, "dict") else item)
+                results.append(item)
         return results
 
     def download_relax_sets(self, **search_kwargs) -> list["MPRelaxSet"]:
