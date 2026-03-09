@@ -7,19 +7,14 @@ client instantiation or configuration details.  Advanced usage may bypass
 the helper by calling :func:`mp_helper.api.get_client` directly.
 """
 
+from emmet.core.mpid import MPID
+from emmet.core.vasp.material import MaterialsDoc
 from pymatgen.core.structure import Structure
 from pymatgen.io.vasp.sets import MPRelaxSet
 
 from .api import get_client
 
 __all__ = ["MaterialsSearcher", "get_relax_sets", "material_ids"]
-
-
-from typing import Any
-
-MaterialRecord = Any  # whatever ``mpr.materials.search`` yields (typically
-# pydantic models).  We do not mutate or convert the results, preserving the
-# original types so callers can access attributes directly.
 
 
 class MaterialsSearcher:
@@ -83,7 +78,7 @@ class MaterialsSearcher:
             except Exception:
                 pass
 
-    def search(self, *, as_dict: bool = False, **search_kwargs) -> list[MaterialRecord]:
+    def search(self, *, as_dict: bool = False, **search_kwargs) -> list[MaterialsDoc]:
         """Return raw records matching the given query.
 
         The results are typically ``MaterialsDoc`` pydantic models, which
@@ -124,11 +119,11 @@ class MaterialsSearcher:
             **search_kwargs: Other keyword arguments are passed through.
 
         Returns:
-            list[MaterialRecord]: A flat list containing every record returned by
+            list[MaterialsDoc]: A flat list containing every record returned by
                 the API.  The helper does not modify the objects; they are
                 returned exactly as produced by ``mpr.materials.search``.
         """
-        results: list[MaterialRecord] = []
+        results: list[MaterialsDoc] = []
         # Use the stored client rather than opening a fresh one each call
         for item in self._mpr.materials.search(**search_kwargs):
             if as_dict and hasattr(item, "dict"):
@@ -137,7 +132,7 @@ class MaterialsSearcher:
                 results.append(item)
         return results
 
-    def get_relax_sets(self, **search_kwargs) -> list["MPRelaxSet"]:
+    def get_relax_sets(self, **search_kwargs) -> list[MPRelaxSet]:
         """Convenience method mirroring :meth:`search`.
 
         The keywords are passed through to :meth:`search`, and the returned
@@ -149,7 +144,7 @@ class MaterialsSearcher:
         return get_relax_sets(self.search(**search_kwargs))
 
 
-def get_relax_sets(records: list[MaterialRecord]) -> list["MPRelaxSet"]:
+def get_relax_sets(records: list[MaterialRecord]) -> list[MPRelaxSet]:
     """Convert a sequence of materials records to ``MPRelaxSet`` objects.
 
     This logic was previously embedded in :class:`MaterialsSearcher`.  The
@@ -167,8 +162,7 @@ def get_relax_sets(records: list[MaterialRecord]) -> list["MPRelaxSet"]:
         A list of ``MPRelaxSet`` instances constructed from the structures
         present in the input records.
     """
-
-    sets: list["MPRelaxSet"] = []
+    sets: list[MPRelaxSet] = []
     for rec in records:
         # ``rec`` could be a dict-like object, a pydantic model.  Grab the
         # serialized structure data however we can.
@@ -196,7 +190,7 @@ def get_relax_sets(records: list[MaterialRecord]) -> list["MPRelaxSet"]:
     return sets
 
 
-def material_ids(records: list[MaterialRecord]) -> list[str]:
+def material_ids(records: list[MaterialRecord]) -> list[MPID]:
     """Extract ``material_id`` values from a sequence of records.
 
     The input may contain either mapping-like objects (e.g. dictionaries) or
@@ -211,14 +205,13 @@ def material_ids(records: list[MaterialRecord]) -> list[str]:
         A list of the material identifiers present in the input, in the same
         order as the original records.
     """
-
-    ids: list[str] = []
+    ids: list[MPID] = []
     for rec in records:
         if isinstance(rec, dict):
-            mid = rec.get("material_id")
+            mpid = rec.get("material_id")
         else:
-            mid = getattr(rec, "material_id", None)
+            mpid = getattr(rec, "material_id", None)
 
-        if mid is not None:
-            ids.append(mid)
+        if mpid is not None:
+            ids.append(mpid)
     return ids
