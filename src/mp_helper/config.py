@@ -3,7 +3,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-# use built-in generics and PEP 604 unions where possible
 from pydantic_settings import BaseSettings
 
 

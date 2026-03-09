@@ -4,7 +4,6 @@ from mp_api.client import MPRester
 
 from .config import MPSettings
 
-# Public API
 __all__ = ["get_client", "open_client"]
 
 
