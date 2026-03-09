@@ -6,12 +6,10 @@ of dictionaries.  This module keeps the public API small; more advanced
 queries can be issued directly through :func:`mp_helper.api.get_client`.
 """
 
-from typing import Iterable
-
 from .api import get_client
 
 
-__all__ = ["download_materials", "download_relax_sets"]
+__all__ = ["MaterialsSearcher"]
 
 
 MaterialRecord = dict[str, object]  # ``mp_api`` returns pydantic models, but for
@@ -22,99 +20,65 @@ MaterialRecord = dict[str, object]  # ``mp_api`` returns pydantic models, but fo
 # pymatgen isn't installed.  The local names are initialized to ``None`` and
 # validated inside the helper.
 try:
-    from pymatgen.core.structure import Structure  # type: ignore[import]
-    from pymatgen.io.vasp.sets import MPRelaxSet  # type: ignore[import]
+    from pymatgen.core.structure import Structure
+    from pymatgen.io.vasp.sets import MPRelaxSet
 except ImportError:  # pragma: no cover - difficult to simulate in tests
     Structure = None  # type: ignore[assignment]
     MPRelaxSet = None  # type: ignore[assignment]
 
 
-def download_materials(compositions: str | Iterable[str]) -> list[MaterialRecord]:
-    """Download materials for one or more chemical systems.
+class MaterialsSearcher:
+    """Convenience wrapper around ``mpr.materials.search``.
 
-    Parameters
-    ----------
-    compositions:
-        A single chemical system string such as ``"Fe-Co"`` or an iterable of
-        such strings.  Each string is passed to the Materials Project API as
-        ``chemsys``.
-
-    Returns
-    -------
-    list[MaterialRecord]
-        A flat list containing every record returned by ``mpr.materials.search``
-        for each chemical system.  The raw objects returned by ``mp-api`` are
-        converted to dictionaries for convenience (this also makes the helper
-        easier to test).
-
-    Notes
-    -----
-    The helper simply wraps :func:`mp_helper.api.get_client` and issues one
-    query per chemical system.  It does **not** perform any caching or rate
-    limiting; callers who need those features should implement them
-    themselves.
+    Each instance simply opens a fresh ``MPRester`` using
+    :func:`mp_helper.api.get_client`.  The two key operations from the earlier
+    version are provided as methods, which accept *any* keyword argument that
+    the underlying ``search`` call supports.  In other words, callers may use
+    ``chemsys`` (the usual case), ``elements``, ``density=(0,5)``,
+    ``formula="Fe2O3"``, etc.  Positional arguments are **not** accepted;
+    all filters must be provided as keywords.
     """
 
-    if isinstance(compositions, str):
-        comps = [compositions]
-    else:
-        comps = list(compositions)
+    def download_materials(self, **search_kwargs) -> list[MaterialRecord]:
+        """Return raw records matching the given query.
 
-    results: list[MaterialRecord] = []
+        Parameters
+        ----------
+        search_kwargs:
+            Keyword arguments directly forwarded to
+            ``mpr.materials.search``.  Consult the Materials Project API
+            documentation for the full list of available filters (for example
+            ``chemsys``, ``elements``, ``density``, ``material_ids``, etc.).
 
-    with get_client() as mpr:
-        for comp in comps:
-            # ``mp-api`` returns a generator-like ``SearchResults`` object; we
-            # convert each item to a dict because the user of this helper may be
-            # expecting plain data structures and it makes testing simpler.
-            for item in mpr.materials.search(chemsys=comp):
-                # ``item`` may already have a ``dict`` method, so use it when
-                # available.
+        Returns
+        -------
+        list[MaterialRecord]
+            A flat list containing every record returned by the API.  Objects
+            that implement ``dict()`` are converted to plain dictionaries.
+        """
+        results: list[MaterialRecord] = []
+        with get_client() as mpr:
+            for item in mpr.materials.search(**search_kwargs):
                 results.append(item.dict() if hasattr(item, "dict") else item)
+        return results
 
-    return results
+    def download_relax_sets(self, **search_kwargs) -> list["MPRelaxSet"]:
+        """Return ``MPRelaxSet`` objects for materials matching ``search_kwargs``.
 
+        The semantics mirror :meth:`download_materials`; any argument that may be
+        passed to ``mpr.materials.search`` is accepted.  Records lacking a
+        ``structure`` field are silently skipped.
+        """
+        if (
+            Structure is None or MPRelaxSet is None
+        ):  # pragma: no cover - import error path
+            raise ImportError("pymatgen is required to build MPRelaxSet objects")
 
-def download_relax_sets(compositions: str | Iterable[str]) -> list["MPRelaxSet"]:
-    """Return :class:`~pymatgen.io.vasp.sets.MPRelaxSet` objects for each
-    material in the given chemical system(s).
-
-    This is a thin convenience wrapper around :func:`download_materials`.  For
-    each record the helper attempts to construct a :class:`pymatgen`
-    ``Structure`` from the serialized ``structure`` field and then instantiates
-    ``MPRelaxSet`` with that structure.
-
-    Parameters
-    ----------
-    compositions
-        Single system string or iterable of strings, same semantics as
-        :func:`download_materials`.
-
-    Returns
-    -------
-    list[MPRelaxSet]
-        One relaxation input set per material whose JSON emitted by the API
-        contained a ``structure`` key.  Materials lacking structural data are
-        skipped.
-
-    Raises
-    ------
-    ImportError
-        If ``pymatgen`` is not installed; the function imports the required
-        classes lazily so that users who never need this helper are not forced
-        to install the dependency.
-    """
-
-    if Structure is None or MPRelaxSet is None:  # pragma: no cover - import error path
-        raise ImportError("pymatgen is required to build MPRelaxSet objects")
-
-    sets: list["MPRelaxSet"] = []
-    for rec in download_materials(compositions):
-        struct_json = rec.get("structure")
-        if struct_json is None:
-            continue
-        # `Structure.from_dict` handles both raw dicts and the JSON format
-        structure = Structure.from_dict(struct_json)  # type: ignore[attr-defined]
-        sets.append(MPRelaxSet(structure))  # type: ignore[call-arg]
-
-    return sets
+        sets: list["MPRelaxSet"] = []
+        for rec in self.download_materials(**search_kwargs):
+            struct_json = rec.get("structure")
+            if struct_json is None:
+                continue
+            structure = Structure.from_dict(struct_json)  # type: ignore[attr-defined]
+            sets.append(MPRelaxSet(structure))  # type: ignore[call-arg]
+        return sets
