@@ -3,7 +3,7 @@
 The :func:`download_materials` convenience wrapper performs one or more
 searches against ``mpr.materials`` and returns the combined results as a list
 of dictionaries.  This module keeps the public API small; more advanced
-queries can be issued directly through :func:`materials_project_helper.api.get_client`.
+queries can be issued directly through :func:`mp_helper.api.get_client`.
 """
 
 from typing import Iterable
@@ -38,7 +38,7 @@ def download_materials(compositions: str | Iterable[str]) -> list[MaterialRecord
 
     Notes
     -----
-    The helper simply wraps :func:`materials_project_helper.api.get_client` and issues one
+    The helper simply wraps :func:`mp_helper.api.get_client` and issues one
     query per chemical system.  It does **not** perform any caching or rate
     limiting; callers who need those features should implement them
     themselves.

@@ -8,7 +8,7 @@ def test_env_loading(tmp_path, monkeypatch):
     # no key in environment initially
     monkeypatch.delenv("MP_API_KEY", raising=False)
 
-    from materials_project_helper.config import MPSettings
+    from mp_helper.config import MPSettings
 
     settings = MPSettings.load(env)
     assert settings.mp_api_key == "abc123"
@@ -20,14 +20,14 @@ def test_directory_search(tmp_path):
     cfg = tmp_path / "config.json"
     cfg.write_text("{\"mp_api_key\": \"xyz789\"}\n")
 
-    from materials_project_helper.config import MPSettings
+    from mp_helper.config import MPSettings
 
     settings = MPSettings.load(tmp_path)
     assert settings.mp_api_key == "xyz789"
 
 
 def test_missing_file(tmp_path):
-    from materials_project_helper.config import MPSettings
+    from mp_helper.config import MPSettings
 
     try:
         MPSettings.load(tmp_path / "nonexistent")
@@ -38,7 +38,7 @@ def test_missing_file(tmp_path):
 
 def test_api_wrapper(monkeypatch):
     # ensure get_client passes correct key to MPRester
-    from materials_project_helper.api import get_client
+    from mp_helper.api import get_client
 
     class Dummy:
         def __init__(self, api_key, **kwargs):
@@ -48,7 +48,7 @@ def test_api_wrapper(monkeypatch):
         def __exit__(self, *args):
             pass
 
-    monkeypatch.setattr("materials_project_helper.api.MPRester", Dummy)
+    monkeypatch.setattr("mp_helper.api.MPRester", Dummy)
     # set env variable for loader
     monkeypatch.setenv("MP_API_KEY", "fromenv")
     with get_client() as d:

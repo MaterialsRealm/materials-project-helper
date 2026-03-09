@@ -1,5 +1,5 @@
 [project]
-name = "materials-project-helper"
+name = "mp_helper"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -12,9 +12,6 @@ dependencies = [
     # base settings is used to load API key from env/files
     "pydantic-settings>=2",
 ]
-
-[project.scripts]
-mp-helper = "materials_project_helper:main"
 
 [build-system]
 requires = ["uv_build>=0.10.9,<0.11.0"]

@@ -9,7 +9,7 @@ variable or from a configuration file located anywhere on disk.
 ## Usage
 
 ```python
-from materials_project_helper import get_client
+from mp_helper import get_client
 
 # option 1: point at a file or directory
 with get_client("/path/to/my/config.env") as mpr:
@@ -28,7 +28,7 @@ with get_client() as mpr:
 # convenience helpers
 
 ```python
-from materials_project_helper import download_materials
+from mp_helper import download_materials
 
 # get all entries in the Fe–Co chemical system
 results = download_materials("Fe-Co")
