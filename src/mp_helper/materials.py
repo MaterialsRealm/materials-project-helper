@@ -12,7 +12,7 @@ from pymatgen.io.vasp.sets import MPRelaxSet
 
 from .api import get_client
 
-__all__ = ["MaterialsSearcher"]
+__all__ = ["MaterialsSearcher", "material_ids"]
 
 
 from typing import Any
@@ -170,3 +170,31 @@ class MaterialsSearcher:
 
             sets.append(MPRelaxSet(structure))  # type: ignore[call-arg]
         return sets
+
+
+def material_ids(records: list[MaterialRecord]) -> list[str]:
+    """Extract ``material_id`` values from a sequence of records.
+
+    The input may contain either mapping-like objects (e.g. dictionaries) or
+    Pydantic models with attributes.  We silently ignore records that lack a
+    ``material_id`` field so callers can safely pass mixed lists.
+
+    Args:
+        records: List of records returned by :meth:`MaterialsSearcher.search` or
+            similar APIs.
+
+    Returns:
+        A list of the material identifiers present in the input, in the same
+        order as the original records.
+    """
+
+    ids: list[str] = []
+    for rec in records:
+        if isinstance(rec, dict):
+            mid = rec.get("material_id")
+        else:
+            mid = getattr(rec, "material_id", None)
+
+        if mid is not None:
+            ids.append(mid)
+    return ids
