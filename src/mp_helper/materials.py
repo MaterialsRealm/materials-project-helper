@@ -6,25 +6,16 @@ of dictionaries.  This module keeps the public API small; more advanced
 queries can be issued directly through :func:`mp_helper.api.get_client`.
 """
 
-from .api import get_client
+from pymatgen.core.structure import Structure
+from pymatgen.io.vasp.sets import MPRelaxSet
 
+from .api import get_client
 
 __all__ = ["MaterialsSearcher"]
 
 
 MaterialRecord = dict[str, object]  # ``mp_api`` returns pydantic models, but for
 # simplicity we convert them to plain mappings in the helper layer.
-
-# ``download_relax_sets`` is an optional helper that needs pymatgen.  We
-# import lazily at module load so callers can still use other helpers even if
-# pymatgen isn't installed.  The local names are initialized to ``None`` and
-# validated inside the helper.
-try:
-    from pymatgen.core.structure import Structure
-    from pymatgen.io.vasp.sets import MPRelaxSet
-except ImportError:  # pragma: no cover - difficult to simulate in tests
-    Structure = None  # type: ignore[assignment]
-    MPRelaxSet = None  # type: ignore[assignment]
 
 
 class MaterialsSearcher:
