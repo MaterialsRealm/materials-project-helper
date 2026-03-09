@@ -7,6 +7,8 @@ client instantiation or configuration details.  Advanced usage may bypass
 the helper by calling :func:`mp_helper.api.get_client` directly.
 """
 
+from pathlib import Path
+
 from emmet.core.mpid import MPID
 from emmet.core.vasp.material import MaterialsDoc
 from pymatgen.core.structure import Structure
@@ -142,6 +144,52 @@ class MaterialsSearcher:
         of records without needing an instance.
         """
         return get_relax_sets(self.search(**search_kwargs))
+
+    def download_relax_sets(self, root_dir: str | Path, **search_kwargs) -> list[Path]:
+        """Search and write each result's relax set to disk.
+
+        This helper combines :meth:`search` and :func:`get_relax_sets` to
+        generate ``MPRelaxSet`` objects, then writes the VASP input files for
+        each set into a subdirectory of ``root_dir`` named after the
+        corresponding ``material_id``.
+
+        The directory structure looks like::
+
+            root_dir/
+                mp-12345/
+                    POSCAR  # etc.
+                mp-67890/
+                    POTCAR
+
+        ``potcar_spec`` is hard-coded to ``True`` for now; callers who need
+        different behaviour can construct their own sets manually.
+
+        Args:
+            root_dir: Path to the directory under which material-specific
+                folders will be created.  The path is created if it does not
+                already exist.
+            **search_kwargs: Same filters accepted by :meth:`search` (for
+                example ``chemsys`` or ``elements``).
+
+        Returns:
+            A list of ``pathlib.Path`` instances corresponding to the
+            directories that were created and populated with inputs.
+        """
+        # Prepare destination
+        root = Path(root_dir)
+        root.mkdir(parents=True, exist_ok=True)
+        # Perform the query and convert to relax sets
+        records = self.search(**search_kwargs)
+        relax_sets = get_relax_sets(records)
+        ids = material_ids(records)
+        paths: list[Path] = []
+        for mpid, rset in zip(ids, relax_sets):
+            dest = root / mpid
+            dest.mkdir(parents=True, exist_ok=True)
+            rset.write_input(dest, potcar_spec=True)
+            paths.append(dest)
+
+        return paths
 
 
 def get_relax_sets(records: list[MaterialsDoc]) -> list[MPRelaxSet]:
