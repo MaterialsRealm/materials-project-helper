@@ -14,8 +14,9 @@ from .api import get_client
 __all__ = ["MaterialsSearcher"]
 
 
-MaterialRecord = dict[str, object]  # ``mp_api`` returns pydantic models, but for
-# simplicity we convert them to plain mappings in the helper layer.
+MaterialRecord = object  # whatever ``mpr.materials.search`` yields (typically
+# pydantic models).  We do not mutate or convert the results, preserving the
+# original types so callers can access attributes directly.
 
 
 class MaterialsSearcher:
@@ -33,19 +34,38 @@ class MaterialsSearcher:
     def download_materials(self, **search_kwargs) -> list[MaterialRecord]:
         """Return raw records matching the given query.
 
-        Parameters
-        ----------
-        search_kwargs:
-            Keyword arguments directly forwarded to
-            ``mpr.materials.search``.  Consult the Materials Project API
-            documentation for the full list of available filters (for example
-            ``chemsys``, ``elements``, ``density``, ``material_ids``, etc.).
+        The keyword arguments mirror the signature of
+        :meth:`mp_api.client.routes.materials.materials.MaterialsRester.search`.
+        Commonly-used parameters are listed below, but any argument supported
+        by the client is accepted.
 
-        Returns
-        -------
-        list[MaterialRecord]
-            A flat list containing every record returned by the API.  Objects
-            that implement ``dict()`` are converted to plain dictionaries.
+        Args:
+            material_ids (str | list[str] | None): One or more MP material
+                identifiers.
+            chemsys (str | list[str] | None): Chemical system(s) (e.g.
+                ``"Fe-Co"`` or ``["Si-O"]``).
+            crystal_system (CrystalSystem | None): crystal system filter.
+            density (tuple[float, float] | None): min/max density.
+            deprecated (bool | None): filter deprecated materials.
+            elements (list[str] | None): include these elements.
+            exclude_elements (list[str] | None): exclude these elements.
+            formula (str | list[str] | None): formula or wildcard.
+            num_elements (tuple[int, int] | None): element-count range.
+            num_sites (tuple[int, int] | None): site-count range.
+            spacegroup_number (int | None): space group number.
+            spacegroup_symbol (str | None): space group symbol.
+            task_ids (list[str] | None): specific task identifiers.
+            volume (tuple[float, float] | None): volume range.
+            num_chunks (int | None): number of result chunks.
+            chunk_size (int): size of each chunk.
+            all_fields (bool): whether to return all fields.
+            fields (list[str] | None): explicit list of fields to fetch.
+            **search_kwargs: Other keyword arguments are passed through.
+
+        Returns:
+            list[MaterialRecord]: A flat list containing every record returned by
+                the API.  The helper does not modify the objects; they are
+                returned exactly as produced by ``mpr.materials.search``.
         """
         results: list[MaterialRecord] = []
         with get_client() as mpr:
