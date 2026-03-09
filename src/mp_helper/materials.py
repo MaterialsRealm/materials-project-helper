@@ -12,7 +12,7 @@ from pymatgen.io.vasp.sets import MPRelaxSet
 
 from .api import get_client
 
-__all__ = ["MaterialsSearcher", "material_ids"]
+__all__ = ["MaterialsSearcher", "get_relax_sets", "material_ids"]
 
 
 from typing import Any
@@ -39,10 +39,10 @@ class MaterialsSearcher:
 
     The two public methods mirror the core ``search`` functionality:
     ``search`` returns the raw documents, and ``get_relax_sets`` converts
-    records with structural data into ``MPRelaxSet`` objects.  Both methods
-    accept whatever keyword arguments the Materials Project API supports
-    (``chemsys``, ``elements``, ``density`` etc.).  Positional arguments are
-    not accepted; supply filters by keyword only.
+    records obtained from :meth:`search` into ``MPRelaxSet`` objects.  Both
+    methods accept whatever keyword arguments the Materials Project API
+    supports (``chemsys``, ``elements``, ``density`` etc.).  Positional
+    arguments are not accepted; supply filters by keyword only.
     """
 
     def __init__(self, mpr=None):
@@ -138,38 +138,62 @@ class MaterialsSearcher:
         return results
 
     def get_relax_sets(self, **search_kwargs) -> list["MPRelaxSet"]:
-        """Return ``MPRelaxSet`` objects for materials matching ``search_kwargs``.
+        """Convenience method mirroring :meth:`search`.
 
-        The semantics mirror :meth:`search`; any argument that may be passed to
-        ``mpr.materials.search`` is accepted.  Records lacking a ``structure``
-        field are silently skipped.
+        The keywords are passed through to :meth:`search`, and the returned
+        sequence of records is then handed off to the module-level
+        :func:`get_relax_sets` helper for conversion.  This keeps the class
+        method lightweight and allows callers to process arbitrary collections
+        of records without needing an instance.
         """
-        sets: list["MPRelaxSet"] = []
-        for rec in self.search(**search_kwargs):
-            # ``rec`` could be a dict-like object, a pydantic model.
-            # Grab the serialized structure data however we can.
-            if isinstance(rec, dict):
-                struct_json = rec.get("structure")
-            else:
-                struct_json = getattr(rec, "structure", None)
+        return get_relax_sets(self.search(**search_kwargs))
 
-            if struct_json is None:
-                continue
 
-            # If it's already a Structure object we can use it directly
-            if isinstance(struct_json, Structure):
-                structure = struct_json
-            else:
-                # Unpack any convenient converter methods
-                if hasattr(struct_json, "dict"):
-                    struct_json = struct_json.dict()
-                elif hasattr(struct_json, "as_dict"):
-                    struct_json = struct_json.as_dict()
+def get_relax_sets(records: list[MaterialRecord]) -> list["MPRelaxSet"]:
+    """Convert a sequence of materials records to ``MPRelaxSet`` objects.
 
-                structure = Structure.from_dict(struct_json)
+    This logic was previously embedded in :class:`MaterialsSearcher`.  The
+    standalone helper accepts *any* iterable of records, where each record may
+    be a mapping-like object or a pydantic model; records without a
+    ``structure`` field are silently ignored.  This makes it easier to reuse
+    the conversion code outside of the search helper (for example, when
+    combining results from multiple queries).
 
-            sets.append(MPRelaxSet(structure))  # type: ignore[call-arg]
-        return sets
+    Args:
+        records: Sequence of raw material documents returned by the
+            Materials Project API.
+
+    Returns:
+        A list of ``MPRelaxSet`` instances constructed from the structures
+        present in the input records.
+    """
+
+    sets: list["MPRelaxSet"] = []
+    for rec in records:
+        # ``rec`` could be a dict-like object, a pydantic model.  Grab the
+        # serialized structure data however we can.
+        if isinstance(rec, dict):
+            struct_json = rec.get("structure")
+        else:
+            struct_json = getattr(rec, "structure", None)
+
+        if struct_json is None:
+            continue
+
+        # If it's already a Structure object we can use it directly
+        if isinstance(struct_json, Structure):
+            structure = struct_json
+        else:
+            # Unpack any convenient converter methods
+            if hasattr(struct_json, "dict"):
+                struct_json = struct_json.dict()
+            elif hasattr(struct_json, "as_dict"):
+                struct_json = struct_json.as_dict()
+
+            structure = Structure.from_dict(struct_json)
+
+        sets.append(MPRelaxSet(structure))  # type: ignore[call-arg]
+    return sets
 
 
 def material_ids(records: list[MaterialRecord]) -> list[str]:
