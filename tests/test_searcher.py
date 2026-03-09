@@ -28,6 +28,9 @@ def test_search_and_relax(monkeypatch):
     s = MaterialsSearcher()
     results = s.search(chemsys="X")
     assert results == [{"structure": {"foo": "bar"}, "chemsys": "X"}]
+    # as_dict should convert models/dicts to plain dicts (noop here)
+    results2 = s.search(as_dict=True, chemsys="X")
+    assert results2 == results
 
     relax = s.get_relax_sets(chemsys="X")
     assert len(relax) == 1

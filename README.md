@@ -27,6 +27,30 @@ with get_client() as mpr:
 
 # querying materials
 
+By default the records returned from ``search`` are the raw objects
+produced by the MP API (usually pydantic ``MaterialsDoc`` models).  To
+obtain plain dictionaries instead, pass ``as_dict=True``:
+
+```python
+results = searcher.search(as_dict=True, chemsys="Fe-Co")
+```
+
+
+A helper that creates its own client should be closed when no longer
+needed.  The simplest way is to use it as a context manager, which ensures
+its internal ``MPRester`` is shut down promptly:
+
+```python
+with MaterialsSearcher() as searcher:
+    docs = searcher.search(chemsys="Fe-Co")
+# client closed here
+```
+
+Alternatively, explicitly delete the helper or call ``del searcher``; the
+object's destructor will close the client eventually.  If you supply your
+own ``mpr`` instance the helper will **not** close it for you.
+
+
 The package exposes a single helper class that wraps an
 ``mp_api.client.MPRester`` instance.  You can either let the helper create
 its own client or inject one of your own.

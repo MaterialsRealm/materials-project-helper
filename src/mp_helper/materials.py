@@ -32,6 +32,11 @@ class MaterialsSearcher:
     collected.  The underlying client is exposed via the read-only
     :attr:`mpr` property so callers can reuse it for other operations.
 
+    If you create a helper without supplying a client you should either
+    explicitly close it when finished (by deleting it or using it as a
+    context manager) or trust the destructor to clean up; using ``with`` is
+    the recommended pattern to avoid lingering connections.
+
     The two public methods mirror the core ``search`` functionality:
     ``search`` returns the raw documents, and ``get_relax_sets`` converts
     records with structural data into ``MPRelaxSet`` objects.  Both methods
@@ -78,8 +83,17 @@ class MaterialsSearcher:
             except Exception:
                 pass
 
-    def search(self, **search_kwargs) -> list[MaterialRecord]:
+    def search(self, *, as_dict: bool = False, **search_kwargs) -> list[MaterialRecord]:
         """Return raw records matching the given query.
+
+        The results are typically ``MaterialsDoc`` pydantic models, which
+        expose many methods and internal attributes when inspected.  If
+        ``as_dict`` is ``True`` each record will be converted to a plain
+        dictionary via the model's :meth:`dict` method (falling back to the
+        object itself when that method is unavailable).
+
+        The keyword arguments mirror the signature of
+        :meth:`mp_api.client.routes.materials.materials.MaterialsRester.search`.
 
         The keyword arguments mirror the signature of
         :meth:`mp_api.client.routes.materials.materials.MaterialsRester.search`.
@@ -117,7 +131,10 @@ class MaterialsSearcher:
         results: list[MaterialRecord] = []
         # Use the stored client rather than opening a fresh one each call
         for item in self._mpr.materials.search(**search_kwargs):
-            results.append(item)
+            if as_dict and hasattr(item, "dict"):
+                results.append(item.dict())
+            else:
+                results.append(item)
         return results
 
     def get_relax_sets(self, **search_kwargs) -> list["MPRelaxSet"]:
@@ -129,9 +146,8 @@ class MaterialsSearcher:
         """
         sets: list["MPRelaxSet"] = []
         for rec in self.search(**search_kwargs):
-            # ``rec`` could be a dict-like object or a pydantic model.  Try
-            # both access methods.
-            struct_json = None
+            # ``rec`` could be a dict-like object, a pydantic model.
+            # Grab the serialized structure data however we can.
             if isinstance(rec, dict):
                 struct_json = rec.get("structure")
             else:
@@ -139,6 +155,18 @@ class MaterialsSearcher:
 
             if struct_json is None:
                 continue
-            structure = Structure.from_dict(struct_json)
+
+            # If it's already a Structure object we can use it directly
+            if isinstance(struct_json, Structure):
+                structure = struct_json
+            else:
+                # Unpack any convenient converter methods
+                if hasattr(struct_json, "dict"):
+                    struct_json = struct_json.dict()
+                elif hasattr(struct_json, "as_dict"):
+                    struct_json = struct_json.as_dict()
+
+                structure = Structure.from_dict(struct_json)
+
             sets.append(MPRelaxSet(structure))  # type: ignore[call-arg]
         return sets
