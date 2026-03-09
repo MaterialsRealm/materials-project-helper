@@ -8,7 +8,7 @@ variable or from a configuration file located anywhere on disk.
 ## Usage
 
 ```python
-from materials_project_helper import get_client
+from mp_helper import get_client
 
 # option 1: point at a file or directory
 with get_client("/path/to/my/config.env") as mpr:
