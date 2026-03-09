@@ -35,6 +35,16 @@ obtain plain dictionaries instead, pass ``as_dict=True``:
 results = searcher.search(as_dict=True, chemsys="Fe-Co")
 ```
 
+You can also write VASP inputs for every matching material by using the
+new :meth:`MaterialsSearcher.download_relax_sets` helper.  Supply a
+``root_dir`` and the same filters you would to ``search``; each material
+gets its own subfolder named for the MP ID::
+
+```python
+searcher = MaterialsSearcher()
+paths = searcher.download_relax_sets("./inputs", chemsys="Fe-Co")
+# paths -> [Path("./inputs/mp-1234"), Path("./inputs/mp-5678"), ...]
+```
 
 A helper that creates its own client should be closed when no longer
 needed.  The simplest way is to use it as a context manager, which ensures
@@ -49,7 +59,6 @@ with MaterialsSearcher() as searcher:
 Alternatively, explicitly delete the helper or call ``del searcher``; the
 object's destructor will close the client eventually.  If you supply your
 own ``mpr`` instance the helper will **not** close it for you.
-
 
 The package exposes a single helper class that wraps an
 ``mp_api.client.MPRester`` instance.  You can either let the helper create
