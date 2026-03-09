@@ -53,12 +53,26 @@ class MPSettings(BaseSettings):
             imported when attempting to read a YAML file.
         """
 
-        if path is None:
-            # rely on the default environment/``.env`` behaviour provided by
-            # pydantic-settings; no special filenames are recognised here.
+        # determine which file (if any) to load from.  We support several
+        # entry points:
+        #
+        # * an explicit path passed by the caller
+        # * a configuration file found in the current working directory or
+        #   any ancestor.  This is important in interactive sessions where the
+        #   notebook may not be launched from the project root.
+        # * no file at all, in which case BaseSettings handles env/.env
+        file_path: Path | None
+
+        if path is not None:
+            file_path = Path(path)
+        else:
+            file_path = _find_config_in_parents(Path.cwd())
+
+        if file_path is None:
+            # no file located; fall back on environment/.env behavior
             settings = cls()
         else:
-            file_path = Path(path)
+            # if the path is a directory, look for a candidate inside it
             if file_path.is_dir():
                 file_path = _find_config_in_dir(file_path)
 
@@ -66,7 +80,9 @@ class MPSettings(BaseSettings):
                 raise FileNotFoundError(f"configuration file not found: {file_path}")
 
             suffix = file_path.suffix.lower()
-            if suffix == ".env":
+            # handle files with no suffix (common when the path ends with a
+            # trailing slash) by treating them as env files
+            if suffix == "" or suffix == ".env":
                 settings = cls(_env_file=str(file_path))
             elif suffix in (".json", ".toml", ".yml", ".yaml"):
                 data = cls._parse_config_file(file_path)
@@ -120,3 +136,20 @@ def _find_config_in_dir(directory: Path) -> Path:
         if candidate.exists():
             return candidate
     raise FileNotFoundError(f"no configuration file found in {directory}")
+
+
+def _find_config_in_parents(start: Path) -> Path | None:
+    """Search *start* and its ancestors for a configuration file.
+
+    The same candidate filenames used by :func:`_find_config_in_dir` are
+    checked.  Returns the first match found or ``None`` if no file exists.
+    """
+    candidates = [".env", "config.json", "config.toml", "config.yml", "config.yaml"]
+    for directory in [start] + list(start.parents):
+        for name in candidates:
+            candidate = directory / name
+            if candidate.exists():
+                # resolve to remove any trailing slashes/relative elements;
+                # this also ensures ``suffix`` returns the expected extension.
+                return candidate.resolve()
+    return None

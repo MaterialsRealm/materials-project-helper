@@ -53,3 +53,21 @@ def test_api_wrapper(monkeypatch):
     monkeypatch.setenv("MP_API_KEY", "fromenv")
     with get_client() as d:
         assert d.api_key == "fromenv"
+
+
+def test_search_parent_env(tmp_path, monkeypatch):
+    # create a nested directory structure with a .env in the root
+    root = tmp_path / "root"
+    child = root / "child" / "grand"
+    child.mkdir(parents=True)
+    env = root / ".env"
+    env.write_text("MP_API_KEY=parentkey\n")
+
+    # change cwd to the deepest directory to simulate notebook working dir
+    monkeypatch.chdir(child)
+    from mp_helper.config import MPSettings
+
+    settings = MPSettings.load(None)
+    assert settings.mp_api_key == "parentkey"
+    # environment variable should be set as a side effect
+    assert os.environ.get("MP_API_KEY") == "parentkey"
