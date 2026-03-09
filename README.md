@@ -25,21 +25,24 @@ with get_client("/some/dir") as mpr:
 with get_client() as mpr:
     ...
 
-# convenience helpers
+# querying materials
+
+Rather than exposing bare helper functions, the package now provides a
+small wrapper class that forwards every keyword argument directly to the
+Materials Project API's search method.
 
 ```python
-from mp_helper import download_materials
+from mp_helper import MaterialsSearcher
 
-# get all entries in the Fe–Co chemical system
-results = download_materials("Fe-Co")
+searcher = MaterialsSearcher()
+# equivalent of ``chemsys="Fe-Co"``
+results = searcher.download_materials(chemsys="Fe-Co")
 
-# or query multiple systems at once
-results = download_materials(["Fe-Co", "Fe-O"])
+# you can pass any supported filter
+results = searcher.download_materials(elements=["Fe", "Co"], density=(0, 7))
 
-# generate a relaxation input set for each result
-from mp_helper import download_relax_sets
-
-relax_sets = download_relax_sets("Fe-Co")  # returns list of MPRelaxSet objects
+# generate relaxation input sets if pymatgen is installed
+relax_sets = searcher.download_relax_sets(chemsys="Fe-Co")
 ```
 
 Supported config file formats are:
