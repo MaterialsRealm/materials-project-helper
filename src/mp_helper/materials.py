@@ -144,7 +144,7 @@ class MaterialsSearcher:
         return get_relax_sets(self.search(**search_kwargs))
 
 
-def get_relax_sets(records: list[MaterialRecord]) -> list[MPRelaxSet]:
+def get_relax_sets(records: list[MaterialsDoc]) -> list[MPRelaxSet]:
     """Convert a sequence of materials records to ``MPRelaxSet`` objects.
 
     This logic was previously embedded in :class:`MaterialsSearcher`.  The
@@ -190,7 +190,7 @@ def get_relax_sets(records: list[MaterialRecord]) -> list[MPRelaxSet]:
     return sets
 
 
-def material_ids(records: list[MaterialRecord]) -> list[MPID]:
+def material_ids(records: list[MaterialsDoc]) -> list[MPID]:
     """Extract ``material_id`` values from a sequence of records.
 
     The input may contain either mapping-like objects (e.g. dictionaries) or
