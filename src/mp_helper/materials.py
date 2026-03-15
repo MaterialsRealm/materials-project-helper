@@ -16,7 +16,7 @@ from pymatgen.io.vasp.sets import MPRelaxSet
 
 from .api import get_client
 
-__all__ = ["MaterialsSearcher", "get_relax_sets", "material_ids"]
+__all__ = ["MaterialsSearcher", "get_relax_sets", "get_cif_files", "material_ids"]
 
 
 class MaterialsSearcher:
@@ -191,6 +191,25 @@ class MaterialsSearcher:
 
         return paths
 
+    def download_cifs(self, root_dir: str | Path, **search_kwargs) -> list[Path]:
+        """Search and write CIF files for each matching result.
+
+        This helper runs :meth:`search` and writes a CIF for each record that
+        contains a structure. Each CIF is written into a subdirectory named
+        after the ``material_id``.
+
+        Args:
+            root_dir: Path to the directory under which material-specific
+                folders will be created.
+            **search_kwargs: Same filters accepted by :meth:`search`.
+
+        Returns:
+            A list of ``pathlib.Path`` instances corresponding to the
+            CIF files that were written.
+        """
+        records = self.search(**search_kwargs)
+        return get_cif_files(root_dir, records)
+
 
 def get_relax_sets(records: list[MaterialsDoc]) -> list[MPRelaxSet]:
     """Convert a sequence of materials records to ``MPRelaxSet`` objects.
@@ -236,6 +255,52 @@ def get_relax_sets(records: list[MaterialsDoc]) -> list[MPRelaxSet]:
 
         sets.append(MPRelaxSet(structure))  # type: ignore[call-arg]
     return sets
+
+
+def get_cif_files(root_dir: str | Path, records: list[MaterialsDoc]) -> list[Path]:
+    """Write CIF files for each record that contains a structure.
+
+    Args:
+        root_dir: Path to the directory under which per-material subfolders are
+            created.
+        records: Sequence of raw material documents returned by the
+            Materials Project API.
+    Returns:
+        A list of ``pathlib.Path`` instances corresponding to the written CIF
+        files.
+    """
+    root = Path(root_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    paths: list[Path] = []
+    for rec in records:
+        if isinstance(rec, dict):
+            mpid = rec.get("material_id")
+            struct_json = rec.get("structure")
+        else:
+            mpid = getattr(rec, "material_id", None)
+            struct_json = getattr(rec, "structure", None)
+
+        if mpid is None or struct_json is None:
+            continue
+
+        # If it's already a Structure object we can use it directly
+        if isinstance(struct_json, Structure):
+            structure = struct_json
+        else:
+            # Unpack any convenient converter methods
+            if hasattr(struct_json, "dict"):
+                struct_json = struct_json.dict()
+            elif hasattr(struct_json, "as_dict"):
+                struct_json = struct_json.as_dict()
+
+            structure = Structure.from_dict(struct_json)
+
+        dest = root / mpid
+        dest.mkdir(parents=True, exist_ok=True)
+        out_path = dest / f"{mpid}.cif"
+        structure.to(filename=str(out_path))
+        paths.append(out_path)
+    return paths
 
 
 def material_ids(records: list[MaterialsDoc]) -> list[MPID]:
