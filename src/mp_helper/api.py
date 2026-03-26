@@ -1,10 +1,23 @@
+import time
 from pathlib import Path
 
 from mp_api.client import MPRester
 
 from .config import MPSettings
 
-__all__ = ["get_client", "open_client"]
+__all__ = ["get_client", "open_client", "throttle_pause"]
+
+
+def throttle_pause(
+    count: int, pause_after: int = 20, pause_seconds: float = 1.1
+) -> None:
+    """Pause execution periodically to avoid API rate limiting."""
+    if pause_after <= 0 or pause_seconds <= 0:
+        return
+
+    if count > 0 and count % pause_after == 0:
+        print(f"Paused after {count} steps to avoid API rate limits")
+        time.sleep(pause_seconds)
 
 
 def get_client(config_path: str | Path | None = None, **mpr_kwargs: object) -> MPRester:
