@@ -112,7 +112,7 @@ def test_summary_searcher_chunks_and_warning(monkeypatch):
         chunks = list(searcher.iter_search_chunks(as_dict=True))
 
     assert chunks == [[{"material_id": "mp-1"}], [{"material_id": "mp-2"}]]
-    assert searcher.mpr.materials.summary.queries == [
+    assert searcher._mpr.materials.summary.queries == [
         {
             "criteria": {"_skip": 0},
             "fields": None,

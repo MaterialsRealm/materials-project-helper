@@ -65,11 +65,6 @@ class MaterialsSearcher:
             self._mpr = mpr
             self._owns_client = False
 
-    @property
-    def mpr(self):
-        """The underlying :class:`MPRester` client (read-only)."""
-        return self._mpr
-
     def __del__(self):
         # Close owned client when garbage-collected; ignore if already closed
         if getattr(self, "_owns_client", False) and self._mpr is not None:
@@ -235,10 +230,6 @@ class MaterialsSummarySearcher:
         else:
             self._mpr = mpr
             self._owns_client = False
-
-    @property
-    def mpr(self):
-        return self._mpr
 
     def __del__(self):
         if getattr(self, "_owns_client", False) and self._mpr is not None:
