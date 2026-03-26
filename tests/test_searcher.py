@@ -1,5 +1,6 @@
 import warnings
 import weakref
+from pathlib import Path
 from typing import Any
 
 
@@ -137,3 +138,112 @@ def test_summary_searcher_chunks_and_warning(monkeypatch):
     ]
 
     assert any("unbounded summary query" in str(w.message) for w in caught)
+
+
+def test_download_cifs_for_material_ids_batches(monkeypatch, tmp_path):
+    class DummyMaterials:
+        def __init__(self):
+            self.queries: list[Any] = []
+
+        def search(self, **kwargs):
+            self.queries.append(kwargs)
+            return [
+                {
+                    "material_id": mpid,
+                    "structure": {"@module": "pymatgen.core.structure", "@class": "Structure"},
+                }
+                for mpid in kwargs["material_ids"]
+            ]
+
+    class DummyClient:
+        def __init__(self, api_key, **kwargs):
+            self.materials = DummyMaterials()
+
+        def close(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr("mp_helper.api.MPRester", DummyClient)
+    monkeypatch.setattr(
+        "mp_helper.materials.get_cif_files",
+        lambda root_dir, records, skip_existing=False: [
+            Path(root_dir) / rec["material_id"] / f'{rec["material_id"]}.cif'
+            for rec in records
+        ],
+    )
+
+    from mp_helper.materials import download_cifs_for_material_ids
+
+    paths = download_cifs_for_material_ids(
+        tmp_path,
+        ["mp-1", "mp-2", "mp-3"],
+        batch_size=2,
+        max_workers=1,
+    )
+
+    assert paths == [
+        tmp_path / "mp-1" / "mp-1.cif",
+        tmp_path / "mp-2" / "mp-2.cif",
+        tmp_path / "mp-3" / "mp-3.cif",
+    ]
+
+
+def test_iter_material_ids_from_csv_and_skip_existing(tmp_path):
+    csv_path = tmp_path / "materials.csv"
+    csv_path.write_text("material_id,name\nmp-1,A\nmp-2,B\nmp-3,C\n", encoding="utf-8")
+    existing = tmp_path / "out" / "mp-2"
+    existing.mkdir(parents=True)
+    (existing / "mp-2.cif").write_text("done", encoding="utf-8")
+
+    from mp_helper.materials import iter_material_id_batches, iter_material_ids_from_csv
+
+    material_ids = list(iter_material_ids_from_csv(csv_path))
+    assert material_ids == ["mp-1", "mp-2", "mp-3"]
+
+    batches = list(
+        iter_material_id_batches(material_ids, batch_size=2, root_dir=tmp_path / "out")
+    )
+    assert batches == [["mp-1", "mp-3"]]
+
+
+def test_download_cifs_from_csv_parallel(monkeypatch, tmp_path):
+    csv_path = tmp_path / "materials.csv"
+    csv_path.write_text("material_id\nmp-1\nmp-2\nmp-3\nmp-4\n", encoding="utf-8")
+    seen: list[list[str]] = []
+
+    def fake_download_batch(
+        material_ids,
+        *,
+        root_dir,
+        config_path=None,
+        skip_existing=False,
+        search_kwargs=None,
+        retry_attempts=5,
+        backoff_seconds=5.0,
+    ):
+        seen.append(list(material_ids))
+        return [Path(root_dir) / mpid / f"{mpid}.cif" for mpid in material_ids]
+
+    monkeypatch.setattr("mp_helper.materials._download_cif_batch", fake_download_batch)
+
+    from mp_helper.materials import download_cifs_from_csv
+
+    paths = download_cifs_from_csv(
+        csv_path,
+        tmp_path / "out",
+        batch_size=2,
+        max_workers=2,
+    )
+
+    assert sorted(seen) == [["mp-1", "mp-2"], ["mp-3", "mp-4"]]
+    assert sorted(paths) == [
+        tmp_path / "out" / "mp-1" / "mp-1.cif",
+        tmp_path / "out" / "mp-2" / "mp-2.cif",
+        tmp_path / "out" / "mp-3" / "mp-3.cif",
+        tmp_path / "out" / "mp-4" / "mp-4.cif",
+    ]

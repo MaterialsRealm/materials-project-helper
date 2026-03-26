@@ -7,12 +7,17 @@ client instantiation or configuration details.  Advanced usage may bypass
 the helper by calling :func:`mp_helper.api.get_client` directly.
 """
 
+import time
 import warnings
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from csv import DictReader, reader
 from pathlib import Path
+from typing import Any
 
 from emmet.core.mpid import MPID
 from emmet.core.vasp.material import MaterialsDoc
+from mp_api.client.core.exceptions import MPRestError
 from pymatgen.core.structure import Structure
 from pymatgen.io.vasp.sets import MPRelaxSet
 
@@ -21,8 +26,11 @@ from .api import get_client
 __all__ = [
     "MaterialsSearcher",
     "MaterialsSummarySearcher",
+    "download_cifs_for_material_ids",
+    "download_cifs_from_csv",
     "get_cif_files",
     "get_relax_sets",
+    "iter_material_id_batches",
     "material_ids",
 ]
 
@@ -194,24 +202,96 @@ class MaterialsSearcher:
 
         return paths
 
-    def download_cifs(self, root_dir: str | Path, **search_kwargs) -> list[Path]:
-        """Search and write CIF files for each matching result.
+    def download_cifs(
+        self,
+        root_dir: str | Path,
+        *,
+        batch_size: int | None = None,
+        skip_existing: bool = False,
+        **search_kwargs,
+    ) -> list[Path]:
+        """Search for materials and write their CIF files to disk.
 
-        This helper runs :meth:`search` and writes a CIF for each record that
-        contains a structure. Each CIF is written into a subdirectory named
-        after the ``material_id``.
+        This helper runs :meth:`search` and writes one CIF for each record that
+        contains a structure. Each material is written to
+        ``<root_dir>/<material_id>/<material_id>.cif``. When ``material_ids``
+        is present in ``search_kwargs`` and ``batch_size`` is provided, the
+        request is executed in batches so large explicit ID lists do not need to
+        materialize in one API call.
 
         Args:
-            root_dir: Path to the directory under which material-specific
-                folders will be created.
-            **search_kwargs: Same filters accepted by :meth:`search`.
+            root_dir: Directory under which per-material subdirectories are
+                created.
+            batch_size: Optional size for batched requests when
+                ``material_ids`` is supplied.
+            skip_existing: If ``True``, skip materials whose CIF file already
+                exists under ``root_dir``.
+            **search_kwargs: Keyword filters accepted by :meth:`search`.
 
         Returns:
-            A list of ``pathlib.Path`` instances corresponding to the
-            CIF files that were written.
+            Paths to the CIF files written during this call.
         """
+        material_ids_arg = search_kwargs.get("material_ids")
+        if batch_size is not None and material_ids_arg is not None:
+            return self.download_cifs_for_material_ids(
+                root_dir,
+                material_ids=material_ids_arg,
+                batch_size=batch_size,
+                skip_existing=skip_existing,
+                **{
+                    key: value
+                    for key, value in search_kwargs.items()
+                    if key != "material_ids"
+                },
+            )
+
         records = self.search(**search_kwargs)
-        return get_cif_files(root_dir, records)
+        return get_cif_files(root_dir, records, skip_existing=skip_existing)
+
+    def download_cifs_for_material_ids(
+        self,
+        root_dir: str | Path,
+        material_ids: Iterable[str | MPID],
+        *,
+        batch_size: int = 1000,
+        skip_existing: bool = False,
+        **search_kwargs,
+    ) -> list[Path]:
+        """Download CIFs for an explicit material-ID sequence in batches.
+
+        Args:
+            root_dir: Directory under which per-material subdirectories are
+                created.
+            material_ids: Material IDs to request from the Materials Project
+                API.
+            batch_size: Number of material IDs to include in each API request.
+            skip_existing: If ``True``, skip IDs whose CIF file already exists
+                under ``root_dir``.
+            **search_kwargs: Additional keyword filters forwarded to
+                :meth:`search`. Any user-provided ``fields`` are merged with the
+                required ``material_id`` and ``structure`` fields.
+
+        Returns:
+            Paths to the CIF files written during this call.
+
+        Raises:
+            ValueError: If ``batch_size`` is not a positive integer.
+        """
+        if batch_size <= 0:
+            raise ValueError("batch_size must be a positive integer")
+
+        root = Path(root_dir)
+        root.mkdir(parents=True, exist_ok=True)
+        paths: list[Path] = []
+        fields = _merge_fields(search_kwargs.pop("fields", None))
+        for batch in iter_material_id_batches(
+            material_ids,
+            batch_size=batch_size,
+            root_dir=root if skip_existing else None,
+        ):
+            records = self.search(material_ids=batch, fields=fields, **search_kwargs)
+            paths.extend(get_cif_files(root, records, skip_existing=skip_existing))
+        return paths
 
 
 class MaterialsSummarySearcher:
@@ -382,7 +462,12 @@ def get_relax_sets(records: list[MaterialsDoc]) -> list[MPRelaxSet]:
     return sets
 
 
-def get_cif_files(root_dir: str | Path, records: list[MaterialsDoc]) -> list[Path]:
+def get_cif_files(
+    root_dir: str | Path,
+    records: list[MaterialsDoc],
+    *,
+    skip_existing: bool = False,
+) -> list[Path]:
     """Write CIF files for each record that contains a structure.
 
     Args:
@@ -423,9 +508,257 @@ def get_cif_files(root_dir: str | Path, records: list[MaterialsDoc]) -> list[Pat
         dest = root / mpid
         dest.mkdir(parents=True, exist_ok=True)
         out_path = dest / f"{mpid}.cif"
+        if skip_existing and out_path.exists():
+            continue
         structure.to(filename=str(out_path))
         paths.append(out_path)
     return paths
+
+
+def iter_material_id_batches(
+    material_ids: Iterable[str | MPID],
+    *,
+    batch_size: int = 1000,
+    root_dir: str | Path | None = None,
+) -> Iterator[list[str]]:
+    """Yield normalized material IDs in fixed-size batches.
+
+    Args:
+        material_ids: Sequence of raw material IDs to normalize and batch.
+        batch_size: Maximum number of IDs to include in each yielded batch.
+        root_dir: Optional download directory used to skip IDs whose
+            ``<material_id>/<material_id>.cif`` file already exists.
+
+    Yields:
+        Lists of normalized material IDs.
+
+    Raises:
+        ValueError: If ``batch_size`` is not a positive integer.
+    """
+    if batch_size <= 0:
+        raise ValueError("batch_size must be a positive integer")
+
+    root = Path(root_dir) if root_dir is not None else None
+    batch: list[str] = []
+    for raw_mpid in material_ids:
+        mpid = str(raw_mpid).strip()
+        if not mpid:
+            continue
+        if root is not None and (root / mpid / f"{mpid}.cif").exists():
+            continue
+        batch.append(mpid)
+        if len(batch) >= batch_size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
+
+
+def iter_material_ids_from_csv(
+    csv_path: str | Path,
+    *,
+    material_id_column: str | int = 0,
+) -> Iterator[str]:
+    """Yield material IDs from a CSV using either a header name or index."""
+    path = Path(csv_path)
+    with path.open(newline="") as handle:
+        if isinstance(material_id_column, str):
+            csv_reader = DictReader(handle)
+            for row in csv_reader:
+                value = row.get(material_id_column)
+                if value:
+                    yield value.strip()
+            return
+
+        csv_reader = reader(handle)
+        # Skip header row
+        next(csv_reader, None)
+        for row in csv_reader:
+            if material_id_column < len(row):
+                value = row[material_id_column].strip()
+                if value:
+                    yield value
+
+
+def _merge_fields(fields: list[str] | None) -> list[str]:
+    """Ensure CIF downloads request the minimum required fields."""
+    merged = list(fields or [])
+    for field in ("material_id", "structure"):
+        if field not in merged:
+            merged.append(field)
+    return merged
+
+
+def _download_cif_batch(
+    material_ids: list[str],
+    *,
+    root_dir: str | Path,
+    config_path: str | Path | None = None,
+    skip_existing: bool = False,
+    search_kwargs: dict[str, Any] | None = None,
+    retry_attempts: int = 5,
+    backoff_seconds: float = 5.0,
+) -> list[Path]:
+    """Download one material-ID batch with an isolated client."""
+    for attempt in range(1, retry_attempts + 1):
+        try:
+            with get_client(config_path) as mpr:
+                searcher = MaterialsSearcher(mpr=mpr)
+                return searcher.download_cifs_for_material_ids(
+                    root_dir,
+                    material_ids,
+                    batch_size=len(material_ids),
+                    skip_existing=skip_existing,
+                    **(search_kwargs or {}),
+                )
+        except MPRestError as exc:
+            if "429" not in str(exc) or attempt >= retry_attempts:
+                raise
+            time.sleep(backoff_seconds * attempt)
+    return []
+
+
+def download_cifs_for_material_ids(
+    root_dir: str | Path,
+    material_ids: Iterable[str | MPID],
+    *,
+    batch_size: int = 1000,
+    max_workers: int = 1,
+    config_path: str | Path | None = None,
+    skip_existing: bool = False,
+    retry_attempts: int = 5,
+    backoff_seconds: float = 5.0,
+    **search_kwargs,
+) -> list[Path]:
+    """Download CIFs for a large explicit material-ID list.
+
+    This helper creates one isolated MP client per worker so the underlying
+    client is never shared across threads. The workload is API- and
+    network-bound, so ``max_workers`` should stay conservative.
+
+    Args:
+        root_dir: Directory under which per-material subdirectories are
+            created.
+        material_ids: Material IDs to request from the Materials Project API.
+        batch_size: Number of material IDs to include in each API request.
+        max_workers: Number of worker threads used to process batches.
+        config_path: Optional configuration file or directory forwarded to
+            :func:`get_client`.
+        skip_existing: If ``True``, skip IDs whose CIF file already exists
+            under ``root_dir``.
+        retry_attempts: Number of times to retry a batch after a 429 response.
+        backoff_seconds: Base delay used for linear backoff between retries.
+        **search_kwargs: Additional keyword filters forwarded to
+            :meth:`MaterialsSearcher.search`.
+
+    Returns:
+        Paths to the CIF files written during this call.
+
+    Raises:
+        ValueError: If ``batch_size`` or ``max_workers`` is not a positive
+            integer.
+    """
+    if batch_size <= 0:
+        raise ValueError("batch_size must be a positive integer")
+    if max_workers <= 0:
+        raise ValueError("max_workers must be a positive integer")
+
+    root = Path(root_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    fields = _merge_fields(search_kwargs.pop("fields", None))
+    batches = list(
+        iter_material_id_batches(
+            material_ids,
+            batch_size=batch_size,
+            root_dir=root if skip_existing else None,
+        )
+    )
+    if not batches:
+        return []
+
+    kwargs = {**search_kwargs, "fields": fields}
+    if max_workers == 1:
+        with get_client(config_path) as mpr:
+            searcher = MaterialsSearcher(mpr=mpr)
+            paths: list[Path] = []
+            for batch in batches:
+                paths.extend(
+                    searcher.download_cifs_for_material_ids(
+                        root,
+                        batch,
+                        batch_size=len(batch),
+                        skip_existing=skip_existing,
+                        **kwargs,
+                    )
+                )
+            return paths
+
+    paths: list[Path] = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(
+                _download_cif_batch,
+                batch,
+                root_dir=root,
+                config_path=config_path,
+                skip_existing=skip_existing,
+                search_kwargs=kwargs,
+                retry_attempts=retry_attempts,
+                backoff_seconds=backoff_seconds,
+            )
+            for batch in batches
+        ]
+        for future in as_completed(futures):
+            paths.extend(future.result())
+    return paths
+
+
+def download_cifs_from_csv(
+    csv_path: str | Path,
+    root_dir: str | Path,
+    *,
+    batch_size: int = 1000,
+    max_workers: int = 1,
+    material_id_column: str | int = "material_id",
+    config_path: str | Path | None = None,
+    skip_existing: bool = False,
+    retry_attempts: int = 5,
+    backoff_seconds: float = 5.0,
+    **search_kwargs,
+) -> list[Path]:
+    """Read material IDs from a CSV and download CIFs in batches.
+
+    Args:
+        csv_path: CSV file containing material IDs.
+        root_dir: Directory under which per-material subdirectories are
+            created.
+        batch_size: Number of material IDs to include in each API request.
+        max_workers: Number of worker threads used to process batches.
+        material_id_column: Header name or zero-based column index containing
+            the material ID values.
+        config_path: Optional configuration file or directory forwarded to
+            :func:`get_client`.
+        skip_existing: If ``True``, skip IDs whose CIF file already exists
+            under ``root_dir``.
+        retry_attempts: Number of times to retry a batch after a 429 response.
+        backoff_seconds: Base delay used for linear backoff between retries.
+        **search_kwargs: Additional keyword filters forwarded to
+            :meth:`MaterialsSearcher.search`.
+
+    Returns:
+        Paths to the CIF files written during this call.
+    """
+    return download_cifs_for_material_ids(
+        root_dir,
+        iter_material_ids_from_csv(csv_path, material_id_column=material_id_column),
+        batch_size=batch_size,
+        max_workers=max_workers,
+        config_path=config_path,
+        skip_existing=skip_existing,
+        retry_attempts=retry_attempts,
+        backoff_seconds=backoff_seconds,
+        **search_kwargs,
+    )
 
 
 def material_ids(records: list[MaterialsDoc]) -> list[MPID]:

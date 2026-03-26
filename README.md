@@ -60,6 +60,19 @@ Alternatively, explicitly delete the helper or call ``del searcher``; the
 object's destructor will close the client eventually.  If you supply your
 own ``mpr`` instance the helper will **not** close it for you.
 
+For large explicit ID lists, avoid one giant ``material_ids=[...]`` call.
+Use the batched CSV helper instead so results are written incrementally and
+can be resumed:
+
+```bash
+uv run python scripts/download_all_cifs.py \
+  --csv mp_all_summary.csv \
+  --out /Users/qz/Downloads/cifs \
+  --batch-size 1000 \
+  --workers 1 \
+  --skip-existing
+```
+
 The package exposes a single helper class that wraps an
 ``mp_api.client.MPRester`` instance.  You can either let the helper create
 its own client or inject one of your own.
