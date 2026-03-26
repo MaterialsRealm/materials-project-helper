@@ -7,6 +7,8 @@ client instantiation or configuration details.  Advanced usage may bypass
 the helper by calling :func:`mp_helper.api.get_client` directly.
 """
 
+import warnings
+from collections.abc import Iterator
 from pathlib import Path
 
 from emmet.core.mpid import MPID
@@ -16,7 +18,13 @@ from pymatgen.io.vasp.sets import MPRelaxSet
 
 from .api import get_client
 
-__all__ = ["MaterialsSearcher", "get_relax_sets", "get_cif_files", "material_ids"]
+__all__ = [
+    "MaterialsSearcher",
+    "MaterialsSummarySearcher",
+    "get_cif_files",
+    "get_relax_sets",
+    "material_ids",
+]
 
 
 class MaterialsSearcher:
@@ -209,6 +217,132 @@ class MaterialsSearcher:
         """
         records = self.search(**search_kwargs)
         return get_cif_files(root_dir, records)
+
+
+class MaterialsSummarySearcher:
+    """Paged helper for the Materials Project summary route.
+
+    This wrapper is intended for summary-table style workloads where callers
+    want to keep memory bounded and process one page of results at a time.
+    Unlike :class:`MaterialsSearcher`, this helper targets
+    ``mpr.materials.summary`` rather than full materials documents.
+    """
+
+    def __init__(self, mpr=None):
+        if mpr is None:
+            self._mpr = get_client()
+            self._owns_client = True
+        else:
+            self._mpr = mpr
+            self._owns_client = False
+
+    @property
+    def mpr(self):
+        return self._mpr
+
+    def __del__(self):
+        if getattr(self, "_owns_client", False) and self._mpr is not None:
+            try:
+                self._mpr.close()
+            except Exception:
+                pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if getattr(self, "_owns_client", False) and self._mpr is not None:
+            try:
+                self._mpr.close()
+            except Exception:
+                pass
+
+    @staticmethod
+    def _warn_if_unbounded_query(criteria: dict, num_chunks: int | None) -> None:
+        if num_chunks is not None:
+            return
+        if not criteria:
+            warnings.warn(
+                "MaterialsSummarySearcher is executing an unbounded summary query. "
+                "Use chunked iteration and write each page out promptly for large exports.",
+                stacklevel=2,
+            )
+
+    def iter_search_chunks(
+        self,
+        *,
+        criteria: dict | None = None,
+        fields: list[str] | None = None,
+        chunk_size: int = 1000,
+        num_chunks: int | None = None,
+        all_fields: bool = False,
+        as_dict: bool = False,
+    ) -> Iterator[list[dict] | list[object]]:
+        """Yield summary results one page at a time.
+
+        Args:
+            criteria: Low-level summary-route query parameters.
+            fields: Explicit summary fields to fetch.
+            chunk_size: Maximum number of documents per page.
+            num_chunks: Optional limit on the number of pages to fetch.
+            all_fields: Whether to request full summary documents.
+            as_dict: Whether to return dictionaries instead of document models.
+        """
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be a positive integer")
+        if num_chunks is not None and num_chunks <= 0:
+            raise ValueError("num_chunks must be positive or None")
+
+        base_criteria = dict(criteria or {})
+        self._warn_if_unbounded_query(base_criteria, num_chunks)
+
+        skip = 0
+        yielded = 0
+        while True:
+            if num_chunks is not None and yielded >= num_chunks:
+                break
+
+            page_criteria = {**base_criteria, "_skip": skip}
+            if all_fields and not fields:
+                page_criteria["_all_fields"] = True
+
+            page = self._mpr.materials.summary._query_resource(
+                criteria=page_criteria,
+                fields=fields,
+                chunk_size=chunk_size,
+                num_chunks=1,
+                use_document_model=not as_dict,
+            )
+            docs = page.get("data", [])
+            if not docs:
+                break
+
+            yield docs
+            yielded += 1
+            skip += len(docs)
+
+    def search(
+        self,
+        *,
+        criteria: dict | None = None,
+        fields: list[str] | None = None,
+        chunk_size: int = 1000,
+        num_chunks: int | None = None,
+        all_fields: bool = False,
+        as_dict: bool = False,
+    ) -> list[dict] | list[object]:
+        """Materialize summary-route results into a list."""
+        results: list[dict] | list[object] = []
+        for chunk in self.iter_search_chunks(
+            criteria=criteria,
+            fields=fields,
+            chunk_size=chunk_size,
+            num_chunks=num_chunks,
+            all_fields=all_fields,
+            as_dict=as_dict,
+        ):
+            results.extend(chunk)
+        return results
 
 
 def get_relax_sets(records: list[MaterialsDoc]) -> list[MPRelaxSet]:
