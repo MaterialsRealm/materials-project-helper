@@ -242,7 +242,7 @@ class MaterialsSearcher:
     def download_cifs_for_material_ids(
         self,
         root_dir: str | Path,
-        material_ids: Iterable[str | MPID],
+        material_ids: Iterable[MPID],
         *,
         batch_size: int = 1000,
         skip_existing: bool = False,
@@ -499,7 +499,7 @@ def get_cif_files(
 
 
 def iter_material_id_batches(
-    material_ids: Iterable[str | MPID],
+    material_ids: Iterable[MPID],
     *,
     batch_size: int = 1000,
     root_dir: str | Path | None = None,
@@ -603,7 +603,7 @@ def _download_cif_batch(
 
 def download_cifs_for_material_ids(
     root_dir: str | Path,
-    material_ids: Iterable[str | MPID],
+    material_ids: Iterable[MPID],
     *,
     batch_size: int = 1000,
     max_workers: int = 1,
