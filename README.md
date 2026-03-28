@@ -28,12 +28,7 @@ with get_client() as mpr:
 # querying materials
 
 By default the records returned from ``search`` are the raw objects
-produced by the MP API (usually pydantic ``MaterialsDoc`` models).  To
-obtain plain dictionaries instead, pass ``as_dict=True``:
-
-```python
-results = searcher.search(as_dict=True, chemsys="Fe-Co")
-```
+produced by the MP API (usually pydantic ``MaterialsDoc`` models).
 
 You can also write VASP inputs for every matching material by using the
 new :meth:`MaterialsSearcher.download_relax_sets` helper.  Supply a

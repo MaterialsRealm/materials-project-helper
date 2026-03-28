@@ -91,20 +91,14 @@ class MaterialsSearcher:
             except Exception:
                 pass
 
-    def search(self, *, as_dict: bool = False, **search_kwargs) -> list[MaterialsDoc]:
+    def search(self, **search_kwargs) -> list[MaterialsDoc]:
         """Return raw records matching the given query.
 
-        The results are typically ``MaterialsDoc`` pydantic models, which
-        expose many methods and internal attributes when inspected.  If
-        ``as_dict`` is ``True`` each record will be converted to a plain
-        dictionary via the model's :meth:`dict` method (falling back to the
-        object itself when that method is unavailable).
+        The results are typically ``MaterialsDoc`` pydantic models.
 
         The keyword arguments mirror the signature of
         :meth:`mp_api.client.routes.materials.materials.MaterialsRester.search`.
 
-        The keyword arguments mirror the signature of
-        :meth:`mp_api.client.routes.materials.materials.MaterialsRester.search`.
         Commonly-used parameters are listed below, but any argument supported
         by the client is accepted.
 
@@ -139,10 +133,7 @@ class MaterialsSearcher:
         results: list[MaterialsDoc] = []
         # Use the stored client rather than opening a fresh one each call
         for item in self._mpr.materials.search(**search_kwargs):
-            if as_dict and hasattr(item, "dict"):
-                results.append(item.dict())
-            else:
-                results.append(item)
+            results.append(item)
         return results
 
     def get_relax_sets(self, **search_kwargs) -> list[MPRelaxSet]:
@@ -347,8 +338,7 @@ class MaterialsSummarySearcher:
         chunk_size: int = 1000,
         num_chunks: int | None = None,
         all_fields: bool = False,
-        as_dict: bool = False,
-    ) -> Iterator[list[dict] | list[object]]:
+    ) -> Iterator[list[object]]:
         """Yield summary results one page at a time.
 
         Args:
@@ -357,7 +347,6 @@ class MaterialsSummarySearcher:
             chunk_size: Maximum number of documents per page.
             num_chunks: Optional limit on the number of pages to fetch.
             all_fields: Whether to request full summary documents.
-            as_dict: Whether to return dictionaries instead of document models.
         """
         if chunk_size <= 0:
             raise ValueError("chunk_size must be a positive integer")
@@ -382,7 +371,7 @@ class MaterialsSummarySearcher:
                 fields=fields,
                 chunk_size=chunk_size,
                 num_chunks=1,
-                use_document_model=not as_dict,
+                use_document_model=True,
             )
             docs = page.get("data", [])
             if not docs:
@@ -400,17 +389,15 @@ class MaterialsSummarySearcher:
         chunk_size: int = 1000,
         num_chunks: int | None = None,
         all_fields: bool = False,
-        as_dict: bool = False,
-    ) -> list[dict] | list[object]:
+    ) -> list[object]:
         """Materialize summary-route results into a list."""
-        results: list[dict] | list[object] = []
+        results: list[object] = []
         for chunk in self.iter_search_chunks(
             criteria=criteria,
             fields=fields,
             chunk_size=chunk_size,
             num_chunks=num_chunks,
             all_fields=all_fields,
-            as_dict=as_dict,
         ):
             results.extend(chunk)
         return results
@@ -453,8 +440,6 @@ def get_relax_sets(records: list[MaterialsDoc]) -> list[MPRelaxSet]:
             # Unpack any convenient converter methods
             if hasattr(struct_json, "dict"):
                 struct_json = struct_json.dict()
-            elif hasattr(struct_json, "as_dict"):
-                struct_json = struct_json.as_dict()
 
             structure = Structure.from_dict(struct_json)
 
@@ -500,8 +485,6 @@ def get_cif_files(
             # Unpack any convenient converter methods
             if hasattr(struct_json, "dict"):
                 struct_json = struct_json.dict()
-            elif hasattr(struct_json, "as_dict"):
-                struct_json = struct_json.as_dict()
 
             structure = Structure.from_dict(struct_json)
 

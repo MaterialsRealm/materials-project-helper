@@ -35,10 +35,6 @@ def test_search_and_relax(monkeypatch):
     s = MaterialsSearcher()
     results = s.search(chemsys="X")
     assert results == [{"structure": {"foo": "bar"}, "chemsys": "X"}]
-    # as_dict should convert models/dicts to plain dicts (noop here)
-    results2 = s.search(as_dict=True, chemsys="X")
-    assert results2 == results
-
     relax = s.get_relax_sets(chemsys="X")
     assert len(relax) == 1
     assert hasattr(relax[0], "struct")
@@ -110,7 +106,7 @@ def test_summary_searcher_chunks_and_warning(monkeypatch):
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         searcher = MaterialsSummarySearcher()
-        chunks = list(searcher.iter_search_chunks(as_dict=True))
+        chunks = list(searcher.iter_search_chunks())
 
     assert chunks == [[{"material_id": "mp-1"}], [{"material_id": "mp-2"}]]
     assert searcher._mpr.materials.summary.queries == [
@@ -119,7 +115,7 @@ def test_summary_searcher_chunks_and_warning(monkeypatch):
             "fields": None,
             "chunk_size": 1000,
             "num_chunks": 1,
-            "use_document_model": False,
+            "use_document_model": True,
         },
         {
             "criteria": {"_skip": 1},
