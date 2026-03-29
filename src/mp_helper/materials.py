@@ -339,13 +339,6 @@ class MaterialsSummarySearcher:
             limit: Optional limit on total documents to fetch.
             all_fields: Whether to request full summary documents.
         """
-        if chunk_size <= 0:
-            raise ValueError("`chunk_size` must be a positive integer")
-        if num_chunks is not None and num_chunks <= 0:
-            raise ValueError("`num_chunks` must be positive or None")
-        if limit is not None and limit <= 0:
-            raise ValueError("`limit` must be positive or None")
-
         base_criteria = dict(criteria or {})
         if num_chunks is None and limit is None and not base_criteria:
             warnings.warn(
