@@ -319,21 +319,6 @@ class MaterialsSummarySearcher:
             except Exception:
                 pass
 
-    @staticmethod
-    def _warn_if_unbounded_query(
-        criteria: dict,
-        num_chunks: int | None,
-        limit: int | None,
-    ) -> None:
-        if num_chunks is not None or limit is not None:
-            return
-        if not criteria:
-            warnings.warn(
-                "MaterialsSummarySearcher is executing an unbounded summary query. "
-                "Use chunked iteration and write each page out promptly for large exports.",
-                stacklevel=2,
-            )
-
     def iter_search_chunks(
         self,
         *,
@@ -362,7 +347,12 @@ class MaterialsSummarySearcher:
             raise ValueError("`limit` must be positive or None")
 
         base_criteria = dict(criteria or {})
-        self._warn_if_unbounded_query(base_criteria, num_chunks, limit)
+        if num_chunks is None and limit is None and not base_criteria:
+            warnings.warn(
+                "MaterialsSummarySearcher is executing an unbounded summary query. "
+                "Use chunked iteration and write each page out promptly for large exports.",
+                stacklevel=2,
+            )
 
         skip = 0
         yielded = 0
