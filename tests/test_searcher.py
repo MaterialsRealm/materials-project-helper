@@ -136,6 +136,98 @@ def test_summary_searcher_chunks_and_warning(monkeypatch):
     assert any("unbounded summary query" in str(w.message) for w in caught)
 
 
+def test_summary_searcher_limit(monkeypatch):
+    class DummySummary:
+        def __init__(self):
+            self.queries: list[Any] = []
+            self.pages = [
+                [{"material_id": "mp-1"}],
+                [{"material_id": "mp-2"}],
+                [],
+            ]
+
+        def _query_resource(self, **kwargs):
+            self.queries.append(kwargs)
+            return {"data": self.pages.pop(0), "meta": {"total_doc": 2}}
+
+    class DummyMaterials:
+        def __init__(self):
+            self.summary = DummySummary()
+
+    class DummyClient:
+        def __init__(self, api_key, **kwargs):
+            self.materials = DummyMaterials()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("mp_helper.api.MPRester", DummyClient)
+    from mp_helper.materials import MaterialsSummarySearcher
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        searcher = MaterialsSummarySearcher()
+        results = searcher.search(limit=1)
+
+    assert results == [{"material_id": "mp-1"}]
+    assert len(searcher._mpr.materials.summary.queries) == 1
+    assert searcher._mpr.materials.summary.queries[0]["chunk_size"] == 1
+    assert not any("unbounded summary query" in str(w.message) for w in caught)
+
+
+def test_summary_searcher_chunk_schedule_helper():
+    from mp_helper.materials import iter_request_chunk_sizes
+
+    helper = iter_request_chunk_sizes
+
+    assert list(helper(chunk_size=1000, num_chunks=2, limit=2500)) == [1000, 1000]
+    assert list(helper(chunk_size=1000, num_chunks=2, limit=900)) == [900]
+    assert list(helper(chunk_size=1000, num_chunks=None, limit=2500)) == [
+        1000,
+        1000,
+        500,
+    ]
+    assert list(helper(chunk_size=1000, num_chunks=2, limit=None)) == [1000, 1000]
+
+
+def test_summary_searcher_limit_clips_chunk_size(monkeypatch):
+    class DummySummary:
+        def __init__(self):
+            self.queries: list[Any] = []
+            self.pages = [
+                [
+                    {"material_id": "mp-1"},
+                    {"material_id": "mp-2"},
+                    {"material_id": "mp-3"},
+                ],
+                [],
+            ]
+
+        def _query_resource(self, **kwargs):
+            self.queries.append(kwargs)
+            return {"data": self.pages.pop(0), "meta": {"total_doc": 3}}
+
+    class DummyMaterials:
+        def __init__(self):
+            self.summary = DummySummary()
+
+    class DummyClient:
+        def __init__(self, api_key, **kwargs):
+            self.materials = DummyMaterials()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("mp_helper.api.MPRester", DummyClient)
+    from mp_helper.materials import MaterialsSummarySearcher
+
+    searcher = MaterialsSummarySearcher()
+    results = searcher.search(chunk_size=1000, limit=2)
+
+    assert results == [{"material_id": "mp-1"}, {"material_id": "mp-2"}]
+    assert searcher._mpr.materials.summary.queries[0]["chunk_size"] == 2
+
+
 def test_download_cifs_for_material_ids_batches(monkeypatch, tmp_path):
     class DummyMaterials:
         def __init__(self):
@@ -146,7 +238,10 @@ def test_download_cifs_for_material_ids_batches(monkeypatch, tmp_path):
             return [
                 {
                     "material_id": mpid,
-                    "structure": {"@module": "pymatgen.core.structure", "@class": "Structure"},
+                    "structure": {
+                        "@module": "pymatgen.core.structure",
+                        "@class": "Structure",
+                    },
                 }
                 for mpid in kwargs["material_ids"]
             ]
@@ -168,7 +263,7 @@ def test_download_cifs_for_material_ids_batches(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "mp_helper.materials.get_cif_files",
         lambda root_dir, records, skip_existing=False: [
-            Path(root_dir) / rec["material_id"] / f'{rec["material_id"]}.cif'
+            Path(root_dir) / rec["material_id"] / f"{rec['material_id']}.cif"
             for rec in records
         ],
     )

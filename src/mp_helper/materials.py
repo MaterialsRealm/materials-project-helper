@@ -320,8 +320,12 @@ class MaterialsSummarySearcher:
                 pass
 
     @staticmethod
-    def _warn_if_unbounded_query(criteria: dict, num_chunks: int | None) -> None:
-        if num_chunks is not None:
+    def _warn_if_unbounded_query(
+        criteria: dict,
+        num_chunks: int | None,
+        limit: int | None,
+    ) -> None:
+        if num_chunks is not None or limit is not None:
             return
         if not criteria:
             warnings.warn(
@@ -337,6 +341,7 @@ class MaterialsSummarySearcher:
         fields: list[str] | None = None,
         chunk_size: int = 1000,
         num_chunks: int | None = None,
+        limit: int | None = None,
         all_fields: bool = False,
     ) -> Iterator[list[object]]:
         """Yield summary results one page at a time.
@@ -346,22 +351,26 @@ class MaterialsSummarySearcher:
             fields: Explicit summary fields to fetch.
             chunk_size: Maximum number of documents per page.
             num_chunks: Optional limit on the number of pages to fetch.
+            limit: Optional limit on total documents to fetch.
             all_fields: Whether to request full summary documents.
         """
         if chunk_size <= 0:
-            raise ValueError("chunk_size must be a positive integer")
+            raise ValueError("`chunk_size` must be a positive integer")
         if num_chunks is not None and num_chunks <= 0:
-            raise ValueError("num_chunks must be positive or None")
+            raise ValueError("`num_chunks` must be positive or None")
+        if limit is not None and limit <= 0:
+            raise ValueError("`limit` must be positive or None")
 
         base_criteria = dict(criteria or {})
-        self._warn_if_unbounded_query(base_criteria, num_chunks)
+        self._warn_if_unbounded_query(base_criteria, num_chunks, limit)
 
         skip = 0
         yielded = 0
-        while True:
-            if num_chunks is not None and yielded >= num_chunks:
-                break
-
+        for request_chunk_size in iter_request_chunk_sizes(
+            chunk_size=chunk_size,
+            num_chunks=num_chunks,
+            limit=limit,
+        ):
             page_criteria = {**base_criteria, "_skip": skip}
             if all_fields and not fields:
                 page_criteria["_all_fields"] = True
@@ -369,17 +378,25 @@ class MaterialsSummarySearcher:
             page = self._mpr.materials.summary._query_resource(
                 criteria=page_criteria,
                 fields=fields,
-                chunk_size=chunk_size,
+                chunk_size=request_chunk_size,
                 num_chunks=1,
-                use_document_model=True,
+                use_document_model=yielded == 0,
             )
             docs = page.get("data", [])
             if not docs:
                 break
 
+            if limit is not None:
+                remaining = limit - skip
+                if len(docs) > remaining:
+                    docs = docs[:remaining]
+
             yield docs
             yielded += 1
             skip += len(docs)
+
+            if limit is not None and skip >= limit:
+                break
 
     def search(
         self,
@@ -388,6 +405,7 @@ class MaterialsSummarySearcher:
         fields: list[str] | None = None,
         chunk_size: int = 1000,
         num_chunks: int | None = None,
+        limit: int | None = None,
         all_fields: bool = False,
     ) -> list[object]:
         """Materialize summary-route results into a list."""
@@ -397,6 +415,7 @@ class MaterialsSummarySearcher:
             fields=fields,
             chunk_size=chunk_size,
             num_chunks=num_chunks,
+            limit=limit,
             all_fields=all_fields,
         ):
             results.extend(chunk)
@@ -769,3 +788,49 @@ def material_ids(records: list[MaterialsDoc]) -> list[MPID]:
         if mpid is not None:
             ids.append(mpid)
     return ids
+
+
+def iter_request_chunk_sizes(
+    chunk_size: int,
+    num_chunks: int | None,
+    limit: int | None,
+) -> Iterator[int]:
+    """Produce a series of per-request chunk sizes given constraints.
+
+    Rules:
+    - num_chunks and limit can both be None (unbounded mode): produce
+      chunk_size forever until upstream page is empty.
+    - limit=None, num_chunks set: produce `num_chunks` chunks of `chunk_size`.
+    - num_chunks=None, limit set: produce chunks sized at most `chunk_size`
+      until total hits `limit`.
+    - both set: produce chunks exactly as above, and stop when either `requested >= num_chunks`
+      or `remaining <= 0`. That is, when both limits are present, the effective total
+      retrieved is limited by the first of `num_chunks * chunk_size` or `limit`.
+
+    Returns:
+        Iterator over each request's chunk_size.
+    """
+    if chunk_size <= 0:
+        raise ValueError("`chunk_size` must be a positive integer")
+    if num_chunks is not None and num_chunks <= 0:
+        raise ValueError("`num_chunks` must be positive or None")
+    if limit is not None and limit <= 0:
+        raise ValueError("`limit` must be positive or None")
+
+    remaining = limit
+    requested = 0
+    while True:
+        if num_chunks is not None and requested >= num_chunks:
+            break
+        if remaining is not None and remaining <= 0:
+            break
+
+        next_chunk = chunk_size if remaining is None else min(chunk_size, remaining)
+        yield next_chunk
+
+        requested += 1
+        if remaining is not None:
+            remaining -= next_chunk
+
+        if remaining is not None and remaining <= 0:
+            break
